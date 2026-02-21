@@ -1,0 +1,26 @@
+[package]
+name = "at-polis"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name='atpolis'
+path='./src/lib.rs'
+
+[[bin]]
+name='at-polis'
+path='./src/main.rs'
+
+[dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio-tungstenite = { version = "0.21", features = ["rustls-tls-webpki-roots"] }
+futures-util = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+zstd = "0.13"
+url = "2"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+anyhow = "1.0.102"
+bsky-sdk = "0.1.23"
+atrium-api = { version = "0.25.7", features = ["tokio"] }
