@@ -1,0 +1,71 @@
+{
+  "lexicon": 1,
+  "id": "com.crown-shy.testing.vote",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "A vote on a statement in the Polis-style deliberation system",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["value", "subject", "poll", "createdAt"],
+        "properties": {
+          "value": {
+            "type": "string",
+            "description": "The vote value",
+            "enum": ["agree", "disagree", "pass"]
+          },
+          "subject": {
+            "type": "ref",
+            "description": "Reference to the statement being voted on",
+            "ref": "#statementRef"
+          },
+          "poll": {
+            "type": "ref",
+            "description": "Reference to the poll this vote belongs to",
+            "ref": "#pollRef"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime",
+            "description": "Timestamp when the vote was created"
+          }
+        }
+      }
+    },
+    "statementRef": {
+      "type": "object",
+      "description": "Reference to a statement record",
+      "required": ["uri", "cid"],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "format": "at-uri",
+          "description": "AT-URI of the statement record"
+        },
+        "cid": {
+          "type": "string",
+          "format": "cid",
+          "description": "Content identifier of the statement record"
+        }
+      }
+    },
+    "pollRef": {
+      "type": "object",
+      "description": "Reference to a poll record",
+      "required": ["uri", "cid"],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "format": "at-uri",
+          "description": "AT-URI of the poll record"
+        },
+        "cid": {
+          "type": "string",
+          "format": "cid",
+          "description": "Content identifier of the poll record"
+        }
+      }
+    }
+  }
+}
