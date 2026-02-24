@@ -1,62 +1,115 @@
+use chrono::Utc;
 use futures_util::StreamExt;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::info;
 use url::Url;
 use zstd::stream::decode_all;
 
-use crate::lexicon::{CommitData, Feature, JetstreamEvent};
+use atrium_api::app::bsky::feed::post::Record as PostRecord;
+use atrium_api::app::bsky::richtext::facet::MainFeaturesItem;
+use atrium_api::types::Union;
 
-const JETSTREAM_URL: &str = "wss://jetstream1.us-east.bsky.network/subscribe";
+use crate::lexicon::{JetstreamEvent, COLLECTION_POLL, COLLECTION_STATEMENT, COLLECTION_VOTE};
+use crate::{Mention, State};
 
-async fn handle_message(bytes: Vec<u8>) -> anyhow::Result<()> {
+// Custom lexicon types for Polis
+use crate::models::{Poll, Statement, Vote, VoteValue};
+
+const JETSTREAM_URL: &str =
+    "wss://jetstream1.us-east.bsky.network/subscribe?wantedCollections=app.bsky.feed.post";
+
+async fn handle_message(bytes: Vec<u8>, tracked_tags: &Vec<String>) -> Option<Vec<Mention>> {
     // Try decompressing (Jetstream often uses zstd)
     let data = match decode_all(&bytes[..]) {
         Ok(decompressed) => decompressed,
         Err(_) => bytes, // not compressed
     };
 
-    handle_text(data).await
+    handle_text(data, tracked_tags).await
 }
 
-fn extract_hash_tags(post: CommitData) -> Vec<String> {
+fn extract_hash_tags(post_record: &PostRecord) -> Vec<String> {
     let mut tags: Vec<String> = vec![];
-    if let Some(facets) = post
-        .record
-        .get("facets")
-        .and_then(serde_json::Value::as_array)
-    {
+
+    if let Some(facets) = &post_record.facets {
         for facet in facets {
-            info!("facets {facet:#?}");
-            if let Some(features) = facet.get("features").and_then(serde_json::Value::as_array) {
-                for feature in features.into_iter() {
-                    let feature: Feature = serde_json::from_value(feature.clone()).unwrap();
-                    if (feature.feature_type == "app.bsky.richtext.facet#tag") {
-                        tags.push(feature.tag.unwrap());
-                    }
+            for feature_union in &facet.features {
+                // Pattern match on Union::Refs to get known feature types
+                if let Union::Refs(MainFeaturesItem::Tag(tag_data)) = feature_union {
+                    tags.push(tag_data.tag.clone());
                 }
-            }
-        }
-    };
-    tags
-}
-
-async fn handle_text(data: Vec<u8>) -> anyhow::Result<()> {
-    let value: Result<JetstreamEvent, _> = serde_json::from_slice(&data);
-
-    if let Ok(message) = value {
-        if let JetstreamEvent::Commit { commit } = message {
-            if (commit.collection == "app.bsky.feed.post") {
-                let text = commit.record.get("text");
-                let tags = extract_hash_tags(commit.clone());
-                info!("Post text: {text:#?} tags: {tags:#?}");
             }
         }
     }
 
-    Ok(())
+    tags
 }
 
-pub async fn run_consumer() -> anyhow::Result<()> {
+async fn handle_text(data: Vec<u8>, tracked_tags: &Vec<String>) -> Option<Vec<Mention>> {
+    let value: Result<JetstreamEvent, _> = serde_json::from_slice(&data);
+
+    if let Ok(message) = value {
+        if let JetstreamEvent::Commit { did, commit, .. } = message {
+            if commit.collection == "app.bsky.feed.post" {
+                // Deserialize to strongly-typed PostRecord
+                match serde_json::from_value::<PostRecord>(commit.record) {
+                    Ok(post_record) => {
+                        let tags = extract_hash_tags(&post_record);
+                        // if !tags.is_empty() {
+                        //     info!("Tags: {tags:#?}");
+                        // }
+                        let selected_tags: Vec<Mention> = tags
+                            .iter()
+                            .filter(|t| tracked_tags.contains(&t.to_lowercase()))
+                            .map(|t| Mention {
+                                tag: t.clone().to_lowercase(),
+                                text: post_record.text.clone(),
+                                by: did.clone(),
+                                at: Utc::now(),
+                            })
+                            .collect();
+
+                        if selected_tags.is_empty() {
+                            return None;
+                        } else {
+                            info!("Got mentions {selected_tags:#?}");
+                            return Some(selected_tags);
+                        }
+                    }
+                    Err(e) => {
+                        info!("Failed to deserialize post record: {}", e);
+                        return None;
+                    }
+                }
+            }
+            // Example: Handle custom Polis lexicon records
+            else if commit.collection == COLLECTION_POLL {
+                if let Ok(poll) = serde_json::from_value::<Poll>(commit.record) {
+                    info!("New poll created: {}", poll.topic);
+                }
+            } else if commit.collection == COLLECTION_STATEMENT {
+                if let Ok(statement) = serde_json::from_value::<Statement>(commit.record) {
+                    info!("New statement: {}", statement.text);
+                }
+            } else if commit.collection == COLLECTION_VOTE {
+                if let Ok(vote) = serde_json::from_value::<Vote>(commit.record) {
+                    match vote.value {
+                        VoteValue::Agree => info!("Vote: agree"),
+                        VoteValue::Disagree => info!("Vote: disagree"),
+                        VoteValue::Pass => info!("Vote: pass"),
+                    }
+                }
+            }
+            return None;
+        } else {
+            return None;
+        }
+    } else {
+        return None;
+    }
+}
+
+pub async fn run_consumer(state: State) -> anyhow::Result<()> {
     let url = Url::parse(JETSTREAM_URL)?;
     let (ws_stream, _) = connect_async(url).await?;
     info!("connected to jetstream");
@@ -66,18 +119,47 @@ pub async fn run_consumer() -> anyhow::Result<()> {
     while let Some(msg) = read.next().await {
         let msg = msg?;
 
+        let tracked_tags = {
+            let tags = state.tracked_tags.lock().await;
+            tags.clone()
+        };
+
         match msg {
             Message::Binary(bytes) => {
-                handle_message(bytes).await?;
+                if let Some(mentions) = handle_message(bytes, &tracked_tags).await {
+                    let mut tag_mentions = state.tag_mentions.lock().await;
+                    for mention in mentions.into_iter() {
+                        (*tag_mentions)
+                            .entry(mention.tag.clone())
+                            .or_insert_with(Vec::new)
+                            .push(mention);
+                    }
+                }
             }
             Message::Text(text) => {
-                handle_text(text.into_bytes()).await?;
+                if let Some(mentions) = handle_text(text.into_bytes(), &tracked_tags).await {
+                    let mut tag_mentions = state.tag_mentions.lock().await;
+                    for mention in mentions.into_iter() {
+                        (*tag_mentions)
+                            .entry(mention.tag.clone())
+                            .or_insert_with(Vec::new)
+                            .push(mention);
+                    }
+                }
             }
             Message::Close(_) => {
                 info!("connection closed");
                 break;
             }
-            _ => {}
+            Message::Ping(_) => {
+                info!("got ping");
+            }
+            Message::Pong(_) => {
+                info!("got pong");
+            }
+            Message::Frame(_) => {
+                info!("got frame");
+            }
         }
     }
 
