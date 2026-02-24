@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ATProto Polis - Lexicons</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 0 20px;
+            line-height: 1.6;
+            color: #333;
+        }
+        h1 {
+            color: #4F46E5;
+            border-bottom: 2px solid #4F46E5;
+            padding-bottom: 10px;
+        }
+        .lexicon {
+            background: #f5f5f5;
+            border-left: 4px solid #4F46E5;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+        .lexicon h2 {
+            margin-top: 0;
+            color: #4F46E5;
+        }
+        .lexicon a {
+            color: #4F46E5;
+            text-decoration: none;
+            font-family: monospace;
+        }
+        .lexicon a:hover {
+            text-decoration: underline;
+        }
+        .description {
+            color: #666;
+            margin: 10px 0;
+        }
+        code {
+            background: #e5e5e5;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <h1>ATProto Polis Lexicons</h1>
+    <p>Public lexicon definitions for the ATProto Polis deliberation platform.</p>
+
+    <div class="lexicon">
+        <h2>Poll</h2>
+        <p class="description">A poll/topic for deliberation in the Polis-style system</p>
+        <p><strong>ID:</strong> <code>com.crown-shy.testing.poll</code></p>
+        <p><strong>URL:</strong> <a href="./com/crown-shy/testing/poll.json">./com/crown-shy/testing/poll.json</a></p>
+    </div>
+
+    <div class="lexicon">
+        <h2>Statement</h2>
+        <p class="description">A statement in the Polis-style deliberation system</p>
+        <p><strong>ID:</strong> <code>com.crown-shy.testing.statement</code></p>
+        <p><strong>URL:</strong> <a href="./com/crown-shy/testing/statement.json">./com/crown-shy/testing/statement.json</a></p>
+    </div>
+
+    <div class="lexicon">
+        <h2>Vote</h2>
+        <p class="description">A vote on a statement in the Polis-style deliberation system</p>
+        <p><strong>ID:</strong> <code>com.crown-shy.testing.vote</code></p>
+        <p><strong>URL:</strong> <a href="./com/crown-shy/testing/vote.json">./com/crown-shy/testing/vote.json</a></p>
+    </div>
+
+    <hr style="margin: 40px 0;">
+
+    <h2>Usage</h2>
+    <p>These lexicons define the schema for records stored in the ATProto network. To use them in your application, reference them by their full URL:</p>
+    <pre><code>https://[your-username].github.io/at_polis/com/crown-shy/testing/poll.json</code></pre>
+
+    <h2>About ATProto Polis</h2>
+    <p>ATProto Polis is a decentralized deliberation platform built on the AT Protocol, inspired by Polis. It enables distributed, user-controlled polling and statement voting.</p>
+
+    <p><a href="https://github.com/[your-username]/at_polis">View on GitHub</a></p>
+</body>
+</html>

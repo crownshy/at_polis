@@ -1,0 +1,12 @@
+# GitHub Pages configuration for serving lexicon JSON files
+
+# Ensure JSON files are served with correct MIME type
+include:
+  - "com/**/*.json"
+
+# Keep Jekyll from processing JSON files
+exclude: []
+
+# Serve JSON files without processing
+keep_files:
+  - com

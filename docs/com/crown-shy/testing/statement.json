@@ -1,0 +1,49 @@
+{
+  "lexicon": 1,
+  "id": "com.crown-shy.testing.statement",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "A statement in the Polis-style deliberation system",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["text", "poll", "createdAt"],
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "The text content of the statement",
+            "maxLength": 3000
+          },
+          "poll": {
+            "type": "ref",
+            "description": "Reference to the poll this statement belongs to",
+            "ref": "#pollRef"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime",
+            "description": "Timestamp when the statement was created"
+          }
+        }
+      }
+    },
+    "pollRef": {
+      "type": "object",
+      "description": "Reference to a poll record",
+      "required": ["uri", "cid"],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "format": "at-uri",
+          "description": "AT-URI of the poll record"
+        },
+        "cid": {
+          "type": "string",
+          "format": "cid",
+          "description": "Content identifier of the poll record"
+        }
+      }
+    }
+  }
+}

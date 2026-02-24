@@ -1,0 +1,37 @@
+{
+  "lexicon": 1,
+  "id": "com.crown-shy.testing.poll",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "A poll/topic for deliberation in the Polis-style system",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["topic", "createdAt"],
+        "properties": {
+          "topic": {
+            "type": "string",
+            "description": "The topic or question being discussed",
+            "maxLength": 300
+          },
+          "description": {
+            "type": "string",
+            "description": "Optional longer description of the poll",
+            "maxLength": 3000
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime",
+            "description": "Timestamp when the poll was created"
+          },
+          "closedAt": {
+            "type": "string",
+            "format": "datetime",
+            "description": "Optional timestamp when the poll was closed to new submissions"
+          }
+        }
+      }
+    }
+  }
+}
