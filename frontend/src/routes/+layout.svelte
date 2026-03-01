@@ -1,8 +1,10 @@
 <script lang="ts">
-	import '../app.css';
-	import { user } from '$lib/stores/auth';
+	import "../app.css";
 
-	let { children } = $props();
+	let { data, children } = $props();
+	let authenticated = $derived(data.authenticated);
+	let did = $derived(data.did);
+	console.log({ authenticated, did });
 </script>
 
 <div class="min-h-screen bg-background">
@@ -10,14 +12,13 @@
 		<div class="container mx-auto px-4 py-4 flex items-center justify-between">
 			<a href="/" class="text-2xl font-bold">ATProto Polis</a>
 			<div class="flex gap-4">
-				{#if $user}
-					<span class="text-muted-foreground">@{$user.handle}</span>
+				{#if authenticated}
+					<span class="text-muted-foreground">@{did}</span>
 					<a href="/polls/create" class="hover:text-primary">Create Poll</a>
 					<a href="/polls" class="hover:text-primary">My Polls</a>
 					<button
 						onclick={() => {
-							user.set(null);
-							window.location.href = '/login';
+							window.location.href = "/login";
 						}}
 						class="hover:text-destructive"
 					>

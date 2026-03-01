@@ -1,6 +1,8 @@
+use atrium_api::types::string::Did;
 use axum::{
     extract::{Path, State as AxumState},
     http::StatusCode,
+    response::Redirect,
     routing::{delete, get, post},
     Json, Router,
 };
@@ -159,27 +161,18 @@ async fn oauth_init_handler(
     }
 }
 
-#[derive(Serialize)]
-struct OAuthCallbackResponse {
-    success: bool,
-    message: String,
-    did: Option<String>,
-}
-
 async fn oauth_callback_handler(
     AxumState(state): AxumState<State>,
     session: TowerSession,
     axum::extract::RawQuery(query): axum::extract::RawQuery,
-) -> Result<Json<OAuthCallbackResponse>, (StatusCode, Json<ErrorResponse>)> {
-    let query_str = query.ok_or_else(|| {
-        (
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error: "missing_query".to_string(),
-                message: "No query parameters provided".to_string(),
-            }),
-        )
-    })?;
+) -> Result<Redirect, Redirect> {
+    let query_str = match query {
+        Some(q) => q,
+        None => {
+            tracing::error!("No query parameters in OAuth callback");
+            return Err(Redirect::to("http://127.0.0.1:5173/?error=missing_params"));
+        }
+    };
 
     tracing::info!("OAuth callback received with query: {}", query_str);
 
@@ -210,13 +203,7 @@ async fn oauth_callback_handler(
             // Store DID in session
             session.insert("did", did.clone()).await.map_err(|e| {
                 tracing::error!("Failed to store DID in session: {}", e);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ErrorResponse {
-                        error: "session_error".to_string(),
-                        message: "Failed to store DID".to_string(),
-                    }),
-                )
+                Redirect::to("http://127.0.0.1:5173/?error=session_error")
             })?;
 
             // Mark this session as OAuth authenticated
@@ -225,13 +212,7 @@ async fn oauth_callback_handler(
                 .await
                 .map_err(|e| {
                     tracing::error!("Failed to store OAuth flag in session: {}", e);
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(ErrorResponse {
-                            error: "session_error".to_string(),
-                            message: "Failed to store session".to_string(),
-                        }),
-                    )
+                    Redirect::to("http://127.0.0.1:5173/?error=session_error")
                 })?;
 
             session
@@ -239,31 +220,15 @@ async fn oauth_callback_handler(
                 .await
                 .map_err(|e| {
                     tracing::error!("Failed to store session ID: {}", e);
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(ErrorResponse {
-                            error: "session_error".to_string(),
-                            message: "Failed to store session ID".to_string(),
-                        }),
-                    )
+                    Redirect::to("http://127.0.0.1:5173/?error=session_error")
                 })?;
 
-            Ok(Json(OAuthCallbackResponse {
-                success: true,
-                message: "OAuth authentication successful. You can now use the API.".to_string(),
-                did: did.map(|d| d.to_string()),
-            }))
+            tracing::info!("OAuth authentication complete, redirecting to app");
+            Ok(Redirect::to("http://127.0.0.1:5173/?success=true"))
         }
         Err(e) => {
-            let error_msg = format!("{}", e);
-            tracing::error!("OAuth callback failed: {}", error_msg);
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: "oauth_callback_failed".to_string(),
-                    message: error_msg,
-                }),
-            ))
+            tracing::error!("OAuth callback failed: {}", e);
+            Err(Redirect::to("http://127.0.0.1:5173/?error=oauth_failed"))
         }
     }
 }
@@ -273,14 +238,22 @@ async fn oauth_callback_handler(
 #[derive(Serialize)]
 struct MeResponse {
     authenticated: bool,
+    did: Option<Did>,
 }
 
 async fn me_handler(AxumState(state): AxumState<State>, session: TowerSession) -> Json<MeResponse> {
-    let is_authenticated = get_oauth_agent(&state, &session).await.is_some();
-
-    Json(MeResponse {
-        authenticated: is_authenticated,
-    })
+    let oauth_agent = get_oauth_agent(&state, &session).await;
+    if let Some(agent) = oauth_agent {
+        Json(MeResponse {
+            authenticated: true,
+            did: agent.did().await,
+        })
+    } else {
+        Json(MeResponse {
+            authenticated: false,
+            did: None,
+        })
+    }
 }
 
 async fn logout_handler(

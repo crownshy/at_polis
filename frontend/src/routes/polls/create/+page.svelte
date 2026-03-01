@@ -1,48 +1,48 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
-	import Button from '$lib/components/ui/Button.svelte';
-	import Input from '$lib/components/ui/Input.svelte';
-	import Textarea from '$lib/components/ui/Textarea.svelte';
-	import Card from '$lib/components/ui/Card.svelte';
-	import { user } from '$lib/stores/auth';
-	import { createPoll } from '$lib/api/client';
-	import { onMount } from 'svelte';
+	import { goto } from "$app/navigation";
+	import Button from "$lib/components/ui/Button.svelte";
+	import Input from "$lib/components/ui/Input.svelte";
+	import Textarea from "$lib/components/ui/Textarea.svelte";
+	import Card from "$lib/components/ui/Card.svelte";
+	import { user } from "$lib/stores/auth";
+	import { createPoll } from "$lib/api/client";
+	import { onMount } from "svelte";
 
-	let topic = $state('');
-	let description = $state('');
+	let { data } = $props();
+
+	let topic = $state("");
+	let description = $state("");
 	let loading = $state(false);
-	let error = $state('');
+	let error = $state("");
 
 	onMount(() => {
-		if (!$user) {
-			goto('/login');
+		if (!data.authenticated) {
+			goto("/login");
 		}
 	});
 
 	async function handleSubmit() {
-		if (!$user) return;
+		if (!data.authenticated) return;
 
 		loading = true;
-		error = '';
+		error = "";
 
 		try {
 			const response = await createPoll({
 				topic,
 				description: description || undefined,
-				identifier: $user.identifier,
-				password: $user.password
 			});
 
 			if (response.success && response.uri && response.cid) {
 				// Redirect to the poll page
 				const encodedUri = encodeURIComponent(response.uri);
-				const cleanCid = response.cid.replace(/^Cid\("(.+)"\)$/, '$1');
+				const cleanCid = response.cid.replace(/^Cid\("(.+)"\)$/, "$1");
 				goto(`/poll/${encodedUri}/${cleanCid}`);
 			} else {
-				error = response.message || 'Failed to create poll';
+				error = response.message || "Failed to create poll";
 			}
 		} catch (e) {
-			error = 'Failed to connect to server';
+			error = "Failed to connect to server";
 		} finally {
 			loading = false;
 		}
@@ -53,7 +53,13 @@
 	<Card class="p-6">
 		<h1 class="text-2xl font-bold mb-6">Create a New Poll</h1>
 
-		<form onsubmit={(e) => { e.preventDefault(); handleSubmit(); }} class="space-y-6">
+		<form
+			onsubmit={(e) => {
+				e.preventDefault();
+				handleSubmit();
+			}}
+			class="space-y-6"
+		>
 			<div>
 				<label for="topic" class="block text-sm font-medium mb-2">
 					Topic <span class="text-destructive">*</span>
@@ -66,7 +72,8 @@
 					disabled={loading}
 				/>
 				<p class="text-xs text-muted-foreground mt-1">
-					A clear, concise question or topic for deliberation (max 300 characters)
+					A clear, concise question or topic for deliberation (max 300
+					characters)
 				</p>
 			</div>
 
@@ -82,7 +89,8 @@
 					disabled={loading}
 				/>
 				<p class="text-xs text-muted-foreground mt-1">
-					Additional details to help participants understand the topic (max 3000 characters)
+					Additional details to help participants understand the topic (max 3000
+					characters)
 				</p>
 			</div>
 
@@ -93,11 +101,16 @@
 			{/if}
 
 			<div class="flex gap-4">
-				<Button type="button" variant="outline" onclick={() => goto('/')} disabled={loading}>
+				<Button
+					type="button"
+					variant="outline"
+					onclick={() => goto("/")}
+					disabled={loading}
+				>
 					Cancel
 				</Button>
 				<Button type="submit" disabled={loading || !topic} class="flex-1">
-					{loading ? 'Creating...' : 'Create Poll'}
+					{loading ? "Creating..." : "Create Poll"}
 				</Button>
 			</div>
 		</form>

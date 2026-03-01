@@ -1,11 +1,42 @@
 <script lang="ts">
-	import { user } from '$lib/stores/auth';
-	import Button from '$lib/components/ui/Button.svelte';
-	import Card from '$lib/components/ui/Card.svelte';
-	import Input from '$lib/components/ui/Input.svelte';
-	import { goto } from '$app/navigation';
+	import { page } from "$app/stores";
+	import { onMount } from "svelte";
+	import Button from "$lib/components/ui/Button.svelte";
+	import Card from "$lib/components/ui/Card.svelte";
+	import Input from "$lib/components/ui/Input.svelte";
+	import { goto } from "$app/navigation";
 
-	let inviteLink = $state('');
+	const { data } = $props();
+	console.log(data);
+	let inviteLink = $state("");
+	let showMessage = $state(false);
+	let messageType = $state<"success" | "error">("success");
+	let message = $state("");
+
+	onMount(() => {
+		// Check for OAuth callback params
+		const params = new URLSearchParams(window.location.search);
+		const success = params.get("success");
+		const error = params.get("error");
+
+		if (success) {
+			showMessage = true;
+			messageType = "success";
+			message = "Successfully logged in with OAuth!";
+			// Clear the URL params
+			window.history.replaceState({}, "", "/");
+			// Hide message after 3 seconds
+			setTimeout(() => {
+				showMessage = false;
+			}, 3000);
+		} else if (error) {
+			showMessage = true;
+			messageType = "error";
+			message = `Login failed: ${error}`;
+			// Clear the URL params
+			window.history.replaceState({}, "", "/");
+		}
+	});
 
 	function handleJoinPoll() {
 		if (!inviteLink) return;
@@ -17,7 +48,7 @@
 			const [, encodedUri, cid] = match;
 			goto(`/poll/${encodedUri}/${cid}`);
 		} else {
-			alert('Invalid invite link');
+			alert("Invalid invite link");
 		}
 	}
 </script>
@@ -30,15 +61,24 @@
 		</p>
 	</div>
 
-	{#if !$user}
+	{#if showMessage}
+		<Card
+			class="p-4 max-w-md mx-auto {messageType === 'success'
+				? 'bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300'
+				: 'bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300'}"
+		>
+			{message}
+		</Card>
+	{/if}
+
+	{#if !data.authenticated}
 		<Card class="p-6 max-w-md mx-auto">
 			<h2 class="text-xl font-semibold mb-4">Get Started</h2>
 			<p class="text-muted-foreground mb-4">
-				Login with your Bluesky account to create polls and participate in discussions.
+				Login with your Bluesky account to create polls and participate in
+				discussions.
 			</p>
-			<Button onclick={() => goto('/login')} class="w-full">
-				Login
-			</Button>
+			<Button onclick={() => goto("/login")} class="w-full">Login</Button>
 		</Card>
 	{:else}
 		<div class="grid md:grid-cols-2 gap-6 max-w-4xl mx-auto">
@@ -47,7 +87,7 @@
 				<p class="text-muted-foreground mb-4">
 					Start a new deliberation topic and invite others to participate.
 				</p>
-				<Button onclick={() => goto('/polls/create')} class="w-full">
+				<Button onclick={() => goto("/polls/create")} class="w-full">
 					Create Poll
 				</Button>
 			</Card>
@@ -58,11 +98,12 @@
 					Enter an invite link to join an existing poll.
 				</p>
 				<div class="space-y-2">
-					<Input
-						bind:value={inviteLink}
-						placeholder="Paste invite link..."
-					/>
-					<Button onclick={handleJoinPoll} class="w-full" disabled={!inviteLink}>
+					<Input bind:value={inviteLink} placeholder="Paste invite link..." />
+					<Button
+						onclick={handleJoinPoll}
+						class="w-full"
+						disabled={!inviteLink}
+					>
 						Join Poll
 					</Button>
 				</div>
