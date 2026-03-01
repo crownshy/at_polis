@@ -24,8 +24,18 @@ tracing-subscriber = "0.3"
 anyhow = "1.0.102"
 bsky-sdk = "0.1.23"
 atrium-api = { version = "0.25.7", features = ["tokio"] }
+atrium-oauth = "0.1.6"
 axum = "0.8.8"
 chrono = { version = "0.4.43", features = ["serde"] }
 tower-sessions = "0.14.0"
 tower = "0.5.2"
 tower-http = { version = "0.6.8", features = ["cors"] }
+reqwest = { version = "0.12", features = ["json"] }
+base64 = "0.22"
+sha2 = "0.10"
+rand = "0.8"
+hickory-resolver = "0.25.2"
+atrium-identity = "0.1.8"
+atrium-xrpc = "0.12.4"
+serde_html_form = "0.4.0"
+uuid = { version = "1.21.0", features = ["v4"] }

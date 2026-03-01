@@ -9,13 +9,13 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tower_sessions::{Session as TowerSession, MemoryStore, SessionManagerLayer};
-use tower_http::cors::{CorsLayer, Any};
+use tower_http::cors::{Any, CorsLayer};
+use tower_sessions::{MemoryStore, Session as TowerSession, SessionManagerLayer};
 
-pub mod auth;
 pub mod jetstream;
 pub mod lexicon;
 pub mod models;
+pub mod oauth2;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Mention {
@@ -28,6 +28,13 @@ pub struct Mention {
 pub struct AppState {
     pub tracked_tags: Arc<Mutex<Vec<String>>>,
     pub tag_mentions: Arc<Mutex<HashMap<String, Vec<Mention>>>>,
+    pub oauth_client: Arc<oauth2::ConfiguredOAuthClient>,
+    // Store OAuth agents by session ID
+    pub oauth_agents: Arc<
+        tokio::sync::RwLock<
+            HashMap<String, Arc<atrium_api::agent::Agent<oauth2::ConfiguredOAuthSession>>>,
+        >,
+    >,
 }
 
 pub type State = Arc<AppState>;
@@ -89,48 +96,205 @@ async fn get_tag_report(
     }
 }
 
-// Authentication endpoints
+// Helper function to get OAuth agent from session
+async fn get_oauth_agent(
+    state: &State,
+    session: &TowerSession,
+) -> Option<Arc<atrium_api::agent::Agent<oauth2::ConfiguredOAuthSession>>> {
+    // Get session ID
+    let session_id: String = session.get("session_id").await.ok().flatten()?;
 
-#[derive(Serialize)]
-struct LoginResponse {
-    success: bool,
-    message: String,
-    session: Option<auth::Session>,
+    // Get agent from storage
+    let agents = state.oauth_agents.read().await;
+    agents.get(&session_id).cloned()
 }
 
-async fn login_handler(
-    session: TowerSession,
-    Json(payload): Json<auth::LoginRequest>,
-) -> Result<Json<LoginResponse>, StatusCode> {
-    match auth::login(&payload.identifier, &payload.password).await {
-        Ok((_agent, session_data)) => {
-            // Store session data
-            session
-                .insert("did", session_data.did.clone())
-                .await
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-            session
-                .insert("handle", session_data.handle.clone())
-                .await
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+// OAuth endpoints
 
-            // Note: In production, you'd want to store the agent in a session store
-            // For now, we'll recreate it on each request
-            Ok(Json(LoginResponse {
-                success: true,
-                message: "Login successful".to_string(),
-                session: Some(session_data),
-            }))
+#[derive(Deserialize)]
+struct OAuthInitRequest {
+    handle: String,
+}
+
+#[derive(Serialize)]
+struct OAuthInitResponse {
+    authorization_url: String,
+}
+
+#[derive(Serialize)]
+struct ErrorResponse {
+    error: String,
+    message: String,
+}
+
+async fn oauth_init_handler(
+    AxumState(state): AxumState<State>,
+    Json(payload): Json<OAuthInitRequest>,
+) -> Result<Json<OAuthInitResponse>, (StatusCode, Json<ErrorResponse>)> {
+    use atrium_oauth::AuthorizeOptions;
+
+    match state
+        .oauth_client
+        .authorize(&payload.handle, AuthorizeOptions::default())
+        .await
+    {
+        Ok(authorization_url) => {
+            tracing::info!(
+                "OAuth authorization initiated for handle: {}",
+                payload.handle
+            );
+            Ok(Json(OAuthInitResponse { authorization_url }))
         }
-        Err(e) => Ok(Json(LoginResponse {
-            success: false,
-            message: format!("Login failed: {}", e),
-            session: None,
-        })),
+        Err(e) => {
+            let error_msg = format!("{}", e);
+            tracing::error!("Failed to initiate OAuth authorization: {}", error_msg);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: "oauth_init_failed".to_string(),
+                    message: error_msg,
+                }),
+            ))
+        }
     }
 }
 
-async fn logout_handler(session: TowerSession) -> Result<Json<serde_json::Value>, StatusCode> {
+#[derive(Serialize)]
+struct OAuthCallbackResponse {
+    success: bool,
+    message: String,
+    did: Option<String>,
+}
+
+async fn oauth_callback_handler(
+    AxumState(state): AxumState<State>,
+    session: TowerSession,
+    axum::extract::RawQuery(query): axum::extract::RawQuery,
+) -> Result<Json<OAuthCallbackResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let query_str = query.ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "missing_query".to_string(),
+                message: "No query parameters provided".to_string(),
+            }),
+        )
+    })?;
+
+    tracing::info!("OAuth callback received with query: {}", query_str);
+
+    // Handle the OAuth callback and get an authenticated agent
+    match oauth2::handle_redirect(&state.oauth_client, &query_str).await {
+        Ok(agent) => {
+            let did = agent.did().await.clone();
+            tracing::info!("OAuth authentication successful for DID: {did:#?}");
+
+            // Get or create a session ID
+            let session_id = match session.id() {
+                Some(id) => id.to_string(),
+                None => {
+                    // Generate a new session if one doesn't exist
+                    let new_id = uuid::Uuid::new_v4().to_string();
+                    tracing::info!("Generated new session ID: {}", new_id);
+                    new_id
+                }
+            };
+
+            // Store the agent in our agent storage
+            {
+                let mut agents = state.oauth_agents.write().await;
+                agents.insert(session_id.clone(), Arc::new(agent));
+                tracing::info!("Stored OAuth agent for session: {}", session_id);
+            }
+
+            // Store DID in session
+            session.insert("did", did.clone()).await.map_err(|e| {
+                tracing::error!("Failed to store DID in session: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorResponse {
+                        error: "session_error".to_string(),
+                        message: "Failed to store DID".to_string(),
+                    }),
+                )
+            })?;
+
+            // Mark this session as OAuth authenticated
+            session
+                .insert("oauth_authenticated", true)
+                .await
+                .map_err(|e| {
+                    tracing::error!("Failed to store OAuth flag in session: {}", e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(ErrorResponse {
+                            error: "session_error".to_string(),
+                            message: "Failed to store session".to_string(),
+                        }),
+                    )
+                })?;
+
+            session
+                .insert("session_id", session_id.clone())
+                .await
+                .map_err(|e| {
+                    tracing::error!("Failed to store session ID: {}", e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(ErrorResponse {
+                            error: "session_error".to_string(),
+                            message: "Failed to store session ID".to_string(),
+                        }),
+                    )
+                })?;
+
+            Ok(Json(OAuthCallbackResponse {
+                success: true,
+                message: "OAuth authentication successful. You can now use the API.".to_string(),
+                did: did.map(|d| d.to_string()),
+            }))
+        }
+        Err(e) => {
+            let error_msg = format!("{}", e);
+            tracing::error!("OAuth callback failed: {}", error_msg);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: "oauth_callback_failed".to_string(),
+                    message: error_msg,
+                }),
+            ))
+        }
+    }
+}
+
+// Session endpoints
+
+#[derive(Serialize)]
+struct MeResponse {
+    authenticated: bool,
+}
+
+async fn me_handler(AxumState(state): AxumState<State>, session: TowerSession) -> Json<MeResponse> {
+    let is_authenticated = get_oauth_agent(&state, &session).await.is_some();
+
+    Json(MeResponse {
+        authenticated: is_authenticated,
+    })
+}
+
+async fn logout_handler(
+    AxumState(state): AxumState<State>,
+    session: TowerSession,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    // Remove agent from storage
+    if let Some(session_id) = session.get::<String>("session_id").await.ok().flatten() {
+        let mut agents = state.oauth_agents.write().await;
+        agents.remove(&session_id);
+        tracing::info!("Removed OAuth agent for session: {}", session_id);
+    }
+
+    // Clear session
     session
         .flush()
         .await
@@ -142,36 +306,12 @@ async fn logout_handler(session: TowerSession) -> Result<Json<serde_json::Value>
     })))
 }
 
-#[derive(Serialize)]
-struct MeResponse {
-    authenticated: bool,
-    session: Option<auth::Session>,
-}
-
-async fn me_handler(session: TowerSession) -> Json<MeResponse> {
-    let did: Option<String> = session.get("did").await.ok().flatten();
-    let handle: Option<String> = session.get("handle").await.ok().flatten();
-
-    match (did, handle) {
-        (Some(did), Some(handle)) => Json(MeResponse {
-            authenticated: true,
-            session: Some(auth::Session { did, handle }),
-        }),
-        _ => Json(MeResponse {
-            authenticated: false,
-            session: None,
-        }),
-    }
-}
-
 // Poll creation endpoint
 
 #[derive(Deserialize)]
 struct CreatePollRequest {
     topic: String,
     description: Option<String>,
-    #[serde(flatten)]
-    credentials: auth::LoginRequest,
 }
 
 // Statement creation endpoint
@@ -181,8 +321,6 @@ struct CreateStatementRequest {
     text: String,
     poll_uri: String,
     poll_cid: String,
-    #[serde(flatten)]
-    credentials: auth::LoginRequest,
 }
 
 #[derive(Serialize)]
@@ -202,8 +340,6 @@ struct CreateVoteRequest {
     statement_cid: String,
     poll_uri: String,
     poll_cid: String,
-    #[serde(flatten)]
-    credentials: auth::LoginRequest,
 }
 
 #[derive(Serialize)]
@@ -223,15 +359,17 @@ struct CreatePollResponse {
 }
 
 async fn create_poll_handler(
+    AxumState(state): AxumState<State>,
+    session: TowerSession,
     Json(payload): Json<CreatePollRequest>,
 ) -> Result<Json<CreatePollResponse>, StatusCode> {
     use atrium_api::com::atproto::repo::create_record::InputData;
     use atrium_api::types::Unknown;
 
-    // Login to get authenticated agent
-    let (agent, _session) = auth::login(&payload.credentials.identifier, &payload.credentials.password)
+    // Get OAuth agent from session
+    let agent = get_oauth_agent(&state, &session)
         .await
-        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+        .ok_or(StatusCode::UNAUTHORIZED)?;
 
     // Create the poll record
     let poll = models::Poll {
@@ -241,20 +379,22 @@ async fn create_poll_handler(
         closed_at: None,
     };
 
-    // Get the authenticated session
-    let session_data = agent
-        .get_session()
+    // Get DID from session
+    let did_string: String = session
+        .get("did")
         .await
+        .ok()
+        .flatten()
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
     // Convert poll to Unknown type for the record
     let poll_value = serde_json::to_value(&poll).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let record: Unknown = serde_json::from_value(poll_value)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let record: Unknown =
+        serde_json::from_value(poll_value).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let record_data = InputData {
         collection: "com.crown-shy.testing.poll".parse().unwrap(),
-        repo: session_data.did.clone().into(),
+        repo: did_string.parse().unwrap(),
         rkey: None,
         swap_commit: None,
         validate: Some(true),
@@ -288,15 +428,17 @@ async fn create_poll_handler(
 }
 
 async fn create_statement_handler(
+    AxumState(state): AxumState<State>,
+    session: TowerSession,
     Json(payload): Json<CreateStatementRequest>,
 ) -> Result<Json<CreateStatementResponse>, StatusCode> {
     use atrium_api::com::atproto::repo::create_record::InputData;
     use atrium_api::types::Unknown;
 
-    // Login to get authenticated agent
-    let (agent, _session) = auth::login(&payload.credentials.identifier, &payload.credentials.password)
+    // Get OAuth agent from session
+    let agent = get_oauth_agent(&state, &session)
         .await
-        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+        .ok_or(StatusCode::UNAUTHORIZED)?;
 
     // Create the statement record
     let statement = models::Statement {
@@ -308,21 +450,23 @@ async fn create_statement_handler(
         created_at: Utc::now(),
     };
 
-    // Get the authenticated session
-    let session_data = agent
-        .get_session()
+    // Get DID from session
+    let did_string: String = session
+        .get("did")
         .await
+        .ok()
+        .flatten()
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
     // Convert statement to Unknown type for the record
-    let statement_value = serde_json::to_value(&statement)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let record: Unknown = serde_json::from_value(statement_value)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let statement_value =
+        serde_json::to_value(&statement).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let record: Unknown =
+        serde_json::from_value(statement_value).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let record_data = InputData {
         collection: "com.crown-shy.testing.statement".parse().unwrap(),
-        repo: session_data.did.clone().into(),
+        repo: did_string.parse().unwrap(),
         rkey: None,
         swap_commit: None,
         validate: Some(true),
@@ -356,6 +500,8 @@ async fn create_statement_handler(
 }
 
 async fn create_vote_handler(
+    AxumState(state): AxumState<State>,
+    session: TowerSession,
     Json(payload): Json<CreateVoteRequest>,
 ) -> Result<Json<CreateVoteResponse>, StatusCode> {
     use atrium_api::com::atproto::repo::create_record::InputData;
@@ -376,10 +522,10 @@ async fn create_vote_handler(
         }
     };
 
-    // Login to get authenticated agent
-    let (agent, _session) = auth::login(&payload.credentials.identifier, &payload.credentials.password)
+    // Get OAuth agent from session
+    let agent = get_oauth_agent(&state, &session)
         .await
-        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+        .ok_or(StatusCode::UNAUTHORIZED)?;
 
     // Create the vote record
     let vote = models::Vote {
@@ -395,21 +541,22 @@ async fn create_vote_handler(
         created_at: Utc::now(),
     };
 
-    // Get the authenticated session
-    let session_data = agent
-        .get_session()
+    // Get DID from session
+    let did_string: String = session
+        .get("did")
         .await
+        .ok()
+        .flatten()
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
     // Convert vote to Unknown type for the record
-    let vote_value = serde_json::to_value(&vote)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let record: Unknown = serde_json::from_value(vote_value)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let vote_value = serde_json::to_value(&vote).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let record: Unknown =
+        serde_json::from_value(vote_value).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let record_data = InputData {
         collection: "com.crown-shy.testing.vote".parse().unwrap(),
-        repo: session_data.did.clone().into(),
+        repo: did_string.parse().unwrap(),
         rkey: None,
         swap_commit: None,
         validate: Some(true),
@@ -445,8 +592,7 @@ async fn create_vote_handler(
 pub async fn start_server(state: State) -> Result<(), anyhow::Error> {
     // Set up session store
     let session_store = MemoryStore::default();
-    let session_layer = SessionManagerLayer::new(session_store)
-        .with_secure(false); // Set to true in production with HTTPS
+    let session_layer = SessionManagerLayer::new(session_store).with_secure(false); // Set to true in production with HTTPS
 
     // Set up CORS
     let cors = CorsLayer::new()
@@ -461,8 +607,9 @@ pub async fn start_server(state: State) -> Result<(), anyhow::Error> {
         .route("/tags", post(add_tag))
         .route("/tags/{tag}", get(get_tag_report))
         .route("/tags/{tag}", delete(remove_tag))
-        // Auth endpoints
-        .route("/login", post(login_handler))
+        // OAuth endpoints
+        .route("/oauth/authorize", post(oauth_init_handler))
+        .route("/oauth/callback", get(oauth_callback_handler))
         .route("/logout", post(logout_handler))
         .route("/me", get(me_handler))
         // Polis endpoints
