@@ -65,13 +65,15 @@ pub async fn create_oauth_client() -> Result<ConfiguredOAuthClient, anyhow::Erro
 
     let config = OAuthClientConfig {
         client_metadata: AtprotoLocalhostClientMetadata {
-            redirect_uris: Some(vec![String::from("http://127.0.0.1:3000/oauth/callback")]),
+            redirect_uris: Some(vec![String::from(
+                "http://127.0.0.1:5173/api/oauth/callback",
+            )]),
             scopes: Some(vec![
                 Scope::Known(KnownScope::Atproto),
                 Scope::Known(KnownScope::TransitionGeneric),
-                Scope::Unknown("com.crown-shy.testing.poll".into()),
-                Scope::Unknown("com.crown-shy.testing.statement".into()),
-                Scope::Unknown("com.crown-shy.testing.vote".into()),
+                Scope::Unknown("repo:com.crown-shy.testing.poll".into()),
+                Scope::Unknown("repo:com.crown-shy.testing.statement".into()),
+                Scope::Unknown("repo:com.crown-shy.testing.vote".into()),
             ]),
         },
         keys: None,
