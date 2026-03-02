@@ -4,9 +4,9 @@ use atrium_identity::{
     handle::{AtprotoHandleResolver, AtprotoHandleResolverConfig, DnsTxtResolver},
 };
 use atrium_oauth::{
-    store::session::MemorySessionStore, store::state::MemoryStateStore,
-    AtprotoLocalhostClientMetadata, AuthorizeOptions, DefaultHttpClient, KnownScope, OAuthClient,
-    OAuthClientConfig, OAuthResolverConfig, OAuthSession, Scope,
+    store::{session::MemorySessionStore, state::MemoryStateStore},
+    AtprotoClientMetadata, AtprotoLocalhostClientMetadata, AuthorizeOptions, DefaultHttpClient,
+    KnownScope, OAuthClient, OAuthClientConfig, OAuthResolverConfig, OAuthSession, Scope,
 };
 use atrium_xrpc::http::Uri;
 use hickory_resolver::{
@@ -63,6 +63,19 @@ impl DnsTxtResolver for HickoryDnsTxtResolver {
 pub async fn create_oauth_client() -> Result<ConfiguredOAuthClient, anyhow::Error> {
     let http_client = Arc::new(DefaultHttpClient::default());
 
+    let resolver = OAuthResolverConfig {
+        did_resolver: CommonDidResolver::new(CommonDidResolverConfig {
+            plc_directory_url: DEFAULT_PLC_DIRECTORY_URL.to_string(),
+            http_client: Arc::clone(&http_client),
+        }),
+        handle_resolver: AtprotoHandleResolver::new(AtprotoHandleResolverConfig {
+            dns_txt_resolver: HickoryDnsTxtResolver::default(),
+            http_client: Arc::clone(&http_client),
+        }),
+        authorization_server_metadata: Default::default(),
+        protected_resource_metadata: Default::default(),
+    };
+
     let config = OAuthClientConfig {
         client_metadata: AtprotoLocalhostClientMetadata {
             redirect_uris: Some(vec![String::from(
@@ -71,24 +84,18 @@ pub async fn create_oauth_client() -> Result<ConfiguredOAuthClient, anyhow::Erro
             scopes: Some(vec![
                 Scope::Known(KnownScope::Atproto),
                 Scope::Known(KnownScope::TransitionGeneric),
-                Scope::Unknown("repo:com.crown-shy.testing.poll".into()),
-                Scope::Unknown("repo:com.crown-shy.testing.statement".into()),
-                Scope::Unknown("repo:com.crown-shy.testing.vote".into()),
+                Scope::Unknown("repo:scot.comhairle.testingPolisPollV1?action=create".into()), // Scope::Unknown("app.bsky.actor.profile".into()),
+                                                                                               // Scope::Unknown("repo:community.lexicon.calendar.rsvp".into()),
+                                                                                               // Scope::Unknown("repo:com.crown-shy.testing.poll".into()),
+                                                                                               // Scope::Unknown("repo:com.crown-shy.testing.statement".into()),
+                                                                                               // Scope::Unknown("repo:com.crown-shy.testing.vote".into()),
+                                                                                               // Scope::Unknown(String::from("repo:blue.2048.game")),
+                                                                                               // Scope::Unknown(String::from("repo:blue.2048.player.profile")),
+                                                                                               // Scope::Unknown(String::from("blue.2048.player.stats")),
             ]),
         },
         keys: None,
-        resolver: OAuthResolverConfig {
-            did_resolver: CommonDidResolver::new(CommonDidResolverConfig {
-                plc_directory_url: DEFAULT_PLC_DIRECTORY_URL.to_string(),
-                http_client: Arc::clone(&http_client),
-            }),
-            handle_resolver: AtprotoHandleResolver::new(AtprotoHandleResolverConfig {
-                dns_txt_resolver: HickoryDnsTxtResolver::default(),
-                http_client: Arc::clone(&http_client),
-            }),
-            authorization_server_metadata: Default::default(),
-            protected_resource_metadata: Default::default(),
-        },
+        resolver,
         state_store: MemoryStateStore::default(),
         session_store: MemorySessionStore::default(),
     };
