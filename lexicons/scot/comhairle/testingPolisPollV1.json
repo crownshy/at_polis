@@ -1,6 +1,4 @@
 {
-  "lexicon": 1,
-  "id": "com.crown-shy.testing.poll",
   "defs": {
     "main": {
       "type": "record",
@@ -33,5 +31,7 @@
         }
       }
     }
-  }
+  },
+  "id": "scot.comhairle.testingPolisPollV1",
+  "lexicon": 1
 }

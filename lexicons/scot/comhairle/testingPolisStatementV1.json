@@ -1,6 +1,4 @@
 {
-  "lexicon": 1,
-  "id": "com.crown-shy.testing.statement",
   "defs": {
     "main": {
       "type": "record",
@@ -45,5 +43,7 @@
         }
       }
     }
-  }
+  },
+  "id": "scot.comhairle.testingPolisStatementV1",
+  "lexicon": 1
 }
