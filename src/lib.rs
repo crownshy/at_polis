@@ -135,13 +135,18 @@ async fn oauth_init_handler(
     AxumState(state): AxumState<State>,
     Json(payload): Json<OAuthInitRequest>,
 ) -> Result<Json<OAuthInitResponse>, (StatusCode, Json<ErrorResponse>)> {
-    use atrium_oauth::AuthorizeOptions;
+    use atrium_oauth::{AuthorizeOptions, KnownScope, Scope};
 
-    match state
-        .oauth_client
-        .authorize(&payload.handle, AuthorizeOptions::default())
-        .await
-    {
+    let options = AuthorizeOptions {
+        scopes: vec![
+            Scope::Known(KnownScope::Atproto),
+            Scope::Known(KnownScope::TransitionGeneric),
+            Scope::Unknown("repo:scot.comhairle.testingPolisPollV1?action=create".into()),
+        ],
+        ..AuthorizeOptions::default()
+    };
+
+    match state.oauth_client.authorize(&payload.handle, options).await {
         Ok(authorization_url) => {
             tracing::info!(
                 "OAuth authorization initiated for handle: {}",
@@ -372,7 +377,7 @@ async fn create_poll_handler(
         repo: did_string.parse().unwrap(),
         rkey: None,
         swap_commit: None,
-        validate: Some(true),
+        validate: Some(false),
         record,
     };
 
@@ -444,7 +449,7 @@ async fn create_statement_handler(
         repo: did_string.parse().unwrap(),
         rkey: None,
         swap_commit: None,
-        validate: Some(true),
+        validate: Some(false),
         record,
     };
 
@@ -534,7 +539,7 @@ async fn create_vote_handler(
         repo: did_string.parse().unwrap(),
         rkey: None,
         swap_commit: None,
-        validate: Some(true),
+        validate: Some(false),
         record,
     };
 
