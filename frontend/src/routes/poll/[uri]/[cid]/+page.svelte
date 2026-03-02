@@ -1,36 +1,40 @@
 <script lang="ts">
-	import { page } from '$app/stores';
-	import { onMount } from 'svelte';
-	import Button from '$lib/components/ui/Button.svelte';
-	import Input from '$lib/components/ui/Input.svelte';
-	import Textarea from '$lib/components/ui/Textarea.svelte';
-	import Card from '$lib/components/ui/Card.svelte';
-	import { user } from '$lib/stores/auth';
-	import { createStatement, createVote } from '$lib/api/client';
-	import { goto } from '$app/navigation';
+	import { page } from "$app/stores";
+	import { onMount } from "svelte";
+	import Button from "$lib/components/ui/Button.svelte";
+	import Input from "$lib/components/ui/Input.svelte";
+	import Textarea from "$lib/components/ui/Textarea.svelte";
+	import Card from "$lib/components/ui/Card.svelte";
+	import { createStatement, createVote } from "$lib/api/client";
+	import { goto } from "$app/navigation";
 
-	const pollUri = $derived(decodeURIComponent($page.params.uri || ''));
-	const pollCid = $derived($page.params.cid || '');
+	const pollUri = $derived(decodeURIComponent($page.params.uri || ""));
+	const pollCid = $derived($page.params.cid || "");
 
-	let newStatement = $state('');
+	let newStatement = $state("");
 	let loading = $state(false);
-	let error = $state('');
-	let inviteLink = $state('');
+	let error = $state("");
+	let inviteLink = $state("");
 	let copied = $state(false);
 
 	// Mock data for statements (in production, this would be fetched from the backend)
-	let statements = $state<Array<{
-		uri: string;
-		cid: string;
-		text: string;
-		author: string;
-		votes?: { agree: number; disagree: number; pass: number };
-		userVote?: 'agree' | 'disagree' | 'pass';
-	}>>([]);
+	let statements = $state<
+		Array<{
+			uri: string;
+			cid: string;
+			text: string;
+			author: string;
+			votes?: { agree: number; disagree: number; pass: number };
+			userVote?: "agree" | "disagree" | "pass";
+		}>
+	>([]);
+
+	let { data } = $props();
+	console.log("data ", data);
 
 	onMount(() => {
-		if (!$user) {
-			goto('/login');
+		if (!data.authenticated) {
+			goto("/login");
 			return;
 		}
 
@@ -40,46 +44,47 @@
 	});
 
 	async function handleAddStatement() {
-		if (!$user || !newStatement.trim()) return;
+		if (!data.authenticated || !newStatement.trim()) return;
 
 		loading = true;
-		error = '';
+		error = "";
 
 		try {
 			const response = await createStatement({
 				text: newStatement,
 				poll_uri: pollUri,
 				poll_cid: pollCid,
-				identifier: $user.identifier,
-				password: $user.password
 			});
 
 			if (response.success && response.uri && response.cid) {
 				// Add the new statement to the local list
-				const cleanCid = response.cid.replace(/^Cid\("(.+)"\)$/, '$1');
+				const cleanCid = response.cid.replace(/^Cid\("(.+)"\)$/, "$1");
 				statements = [
 					...statements,
 					{
 						uri: response.uri,
 						cid: cleanCid,
 						text: newStatement,
-						author: $user.handle,
-						votes: { agree: 0, disagree: 0, pass: 0 }
-					}
+						author: data.did,
+						votes: { agree: 0, disagree: 0, pass: 0 },
+					},
 				];
-				newStatement = '';
+				newStatement = "";
 			} else {
-				error = response.message || 'Failed to create statement';
+				error = response.message || "Failed to create statement";
 			}
 		} catch (e) {
-			error = 'Failed to connect to server';
+			error = "Failed to connect to server";
 		} finally {
 			loading = false;
 		}
 	}
 
-	async function handleVote(statement: typeof statements[0], value: 'agree' | 'disagree' | 'pass') {
-		if (!$user) return;
+	async function handleVote(
+		statement: (typeof statements)[0],
+		value: "agree" | "disagree" | "pass",
+	) {
+		if (!data.authenticated) return;
 
 		try {
 			const response = await createVote({
@@ -88,8 +93,6 @@
 				statement_cid: statement.cid,
 				poll_uri: pollUri,
 				poll_cid: pollCid,
-				identifier: $user.identifier,
-				password: $user.password
 			});
 
 			if (response.success) {
@@ -110,7 +113,7 @@
 				}
 			}
 		} catch (e) {
-			console.error('Vote failed:', e);
+			console.error("Vote failed:", e);
 		}
 	}
 
@@ -132,7 +135,7 @@
 		<div class="flex gap-2">
 			<Input value={inviteLink} readonly class="flex-1" />
 			<Button onclick={copyInviteLink}>
-				{copied ? 'Copied!' : 'Copy Link'}
+				{copied ? "Copied!" : "Copy Link"}
 			</Button>
 		</div>
 		<p class="text-xs text-muted-foreground mt-2">
@@ -143,7 +146,13 @@
 	<!-- Add Statement -->
 	<Card class="p-6">
 		<h2 class="text-xl font-semibold mb-4">Add a Statement</h2>
-		<form onsubmit={(e) => { e.preventDefault(); handleAddStatement(); }} class="space-y-4">
+		<form
+			onsubmit={(e) => {
+				e.preventDefault();
+				handleAddStatement();
+			}}
+			class="space-y-4"
+		>
 			<Textarea
 				bind:value={newStatement}
 				placeholder="Share your perspective on this topic..."
@@ -158,7 +167,7 @@
 			{/if}
 
 			<Button type="submit" disabled={loading || !newStatement.trim()}>
-				{loading ? 'Adding...' : 'Add Statement'}
+				{loading ? "Adding..." : "Add Statement"}
 			</Button>
 		</form>
 	</Card>
@@ -175,27 +184,31 @@
 			{#each statements as statement (statement.uri)}
 				<Card class="p-6">
 					<p class="text-lg mb-2">{statement.text}</p>
-					<p class="text-sm text-muted-foreground mb-4">by @{statement.author}</p>
+					<p class="text-sm text-muted-foreground mb-4">
+						by @{statement.author}
+					</p>
 
 					<div class="flex items-center gap-4">
 						<Button
 							size="sm"
-							variant={statement.userVote === 'agree' ? 'default' : 'outline'}
-							onclick={() => handleVote(statement, 'agree')}
+							variant={statement.userVote === "agree" ? "default" : "outline"}
+							onclick={() => handleVote(statement, "agree")}
 						>
 							👍 Agree {statement.votes?.agree || 0}
 						</Button>
 						<Button
 							size="sm"
-							variant={statement.userVote === 'disagree' ? 'default' : 'outline'}
-							onclick={() => handleVote(statement, 'disagree')}
+							variant={statement.userVote === "disagree"
+								? "default"
+								: "outline"}
+							onclick={() => handleVote(statement, "disagree")}
 						>
 							👎 Disagree {statement.votes?.disagree || 0}
 						</Button>
 						<Button
 							size="sm"
-							variant={statement.userVote === 'pass' ? 'default' : 'outline'}
-							onclick={() => handleVote(statement, 'pass')}
+							variant={statement.userVote === "pass" ? "default" : "outline"}
+							onclick={() => handleVote(statement, "pass")}
 						>
 							🤷 Pass {statement.votes?.pass || 0}
 						</Button>
