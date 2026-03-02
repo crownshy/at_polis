@@ -41,6 +41,6 @@ pub struct CommitData {
 }
 
 // Collection identifiers for our custom lexicons
-pub const COLLECTION_POLL: &str = "com.crown-shy.testing.poll";
-pub const COLLECTION_STATEMENT: &str = "com.crown-shy.testing.statement";
-pub const COLLECTION_VOTE: &str = "com.crown-shy.testing.vote";
+pub const COLLECTION_POLL: &str = "scot.comhairle.testingPolisPollV1";
+pub const COLLECTION_STATEMENT: &str = "scot.comhairle.testingPolisStatementV1";
+pub const COLLECTION_VOTE: &str = "scot.comhairle.testingPolisVoteV1";

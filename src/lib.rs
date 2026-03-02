@@ -14,6 +14,8 @@ use tokio::sync::Mutex;
 use tower_http::cors::{Any, CorsLayer};
 use tower_sessions::{MemoryStore, Session as TowerSession, SessionManagerLayer};
 
+use crate::lexicon::{COLLECTION_POLL, COLLECTION_STATEMENT, COLLECTION_VOTE};
+
 pub mod jetstream;
 pub mod lexicon;
 pub mod models;
@@ -366,7 +368,7 @@ async fn create_poll_handler(
         serde_json::from_value(poll_value).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let record_data = InputData {
-        collection: "com.crown-shy.testing.poll".parse().unwrap(),
+        collection: COLLECTION_POLL.parse().unwrap(),
         repo: did_string.parse().unwrap(),
         rkey: None,
         swap_commit: None,
@@ -438,7 +440,7 @@ async fn create_statement_handler(
         serde_json::from_value(statement_value).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let record_data = InputData {
-        collection: "com.crown-shy.testing.statement".parse().unwrap(),
+        collection: COLLECTION_STATEMENT.parse().unwrap(),
         repo: did_string.parse().unwrap(),
         rkey: None,
         swap_commit: None,
@@ -528,7 +530,7 @@ async fn create_vote_handler(
         serde_json::from_value(vote_value).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let record_data = InputData {
-        collection: "com.crown-shy.testing.vote".parse().unwrap(),
+        collection: COLLECTION_VOTE.parse().unwrap(),
         repo: did_string.parse().unwrap(),
         rkey: None,
         swap_commit: None,
