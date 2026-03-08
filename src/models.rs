@@ -13,15 +13,18 @@ pub struct Poll {
     pub description: Option<String>,
 
     /// Timestamp when the poll was created
-    #[serde(rename = "createdAt")]
+    #[serde(rename = "createdAt", alias = "created_at")]
     pub created_at: DateTime<Utc>,
 
     /// Optional timestamp when the poll was closed to new submissions
-    #[serde(rename = "closedAt", skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "closedAt", alias = "closed_at", skip_serializing_if = "Option::is_none")]
     pub closed_at: Option<DateTime<Utc>>,
 
+    #[serde(default)]
     pub uri: String,
+    #[serde(default)]
     pub did: String,
+    #[serde(default)]
     pub cid: String,
 }
 
@@ -36,11 +39,14 @@ pub struct Statement {
     pub poll: PollRef,
 
     /// Timestamp when the statement was created
-    #[serde(rename = "createdAt")]
+    #[serde(rename = "createdAt", alias = "created_at")]
     pub created_at: DateTime<Utc>,
 
+    #[serde(default)]
     pub uri: String,
+    #[serde(default)]
     pub did: String,
+    #[serde(default)]
     pub cid: String,
 }
 
@@ -58,11 +64,14 @@ pub struct Vote {
     pub poll: PollRef,
 
     /// Timestamp when the vote was created
-    #[serde(rename = "createdAt")]
+    #[serde(rename = "createdAt", alias = "created_at")]
     pub created_at: DateTime<Utc>,
 
+    #[serde(default)]
     pub uri: String,
+    #[serde(default)]
     pub did: String,
+    #[serde(default)]
     pub cid: String,
 }
 

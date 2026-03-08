@@ -1,7 +1,7 @@
 use chrono::Utc;
 use futures_util::StreamExt;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
-use tracing::info;
+use tracing::{error, info};
 use url::Url;
 use zstd::stream::decode_all;
 
@@ -114,16 +114,20 @@ async fn handle_text(
                     }
                 }
             } else if commit.collection == COLLECTION_VOTE {
-                if let Ok(vote) = serde_json::from_value::<Vote>(commit.record) {
-                    let vote_str = match vote.value {
-                        VoteValue::Agree => "agree",
-                        VoteValue::Disagree => "disagree",
-                        VoteValue::Pass => "pass",
-                    };
-                    info!("Vote: {} ({})", vote_str, uri);
-                    if let Err(e) = upsert_vote(&state.db, &uri, &cid, &did, &vote).await {
-                        info!("Failed to store vote in database: {}", e);
+                info!("processing vote {:#?}", commit.record);
+                match serde_json::from_value::<Vote>(commit.record) {
+                    Ok(vote) => {
+                        let vote_str = match vote.value {
+                            VoteValue::Agree => "agree",
+                            VoteValue::Disagree => "disagree",
+                            VoteValue::Pass => "pass",
+                        };
+                        info!("Vote: {} ({})", vote_str, uri);
+                        if let Err(e) = upsert_vote(&state.db, &uri, &cid, &did, &vote).await {
+                            info!("Failed to store vote in database: {}", e);
+                        }
                     }
+                    Err(e) => error!("Failed to deserialize vote {e:#?}"),
                 }
             }
             return None;
