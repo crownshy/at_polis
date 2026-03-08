@@ -63,6 +63,7 @@ export async function createStatement(
 }
 
 export async function createVote(data: CreateVoteRequest): Promise<CreateVoteResponse> {
+	console.log("Creating vote ", data)
 	const response = await fetch(`${API_BASE}/votes`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },

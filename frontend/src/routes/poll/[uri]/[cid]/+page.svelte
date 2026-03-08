@@ -16,21 +16,24 @@
 	let error = $state("");
 	let inviteLink = $state("");
 	let copied = $state(false);
+	let votingLoading = $state(false);
 
-	// Mock data for statements (in production, this would be fetched from the backend)
-	let statements = $state<
-		Array<{
+	interface Statement {
+		uri: string;
+		cid: string;
+		did: string;
+		text: string;
+		createdAt: string;
+		poll: {
 			uri: string;
 			cid: string;
-			text: string;
-			author: string;
-			votes?: { agree: number; disagree: number; pass: number };
-			userVote?: "agree" | "disagree" | "pass";
-		}>
-	>([]);
+		};
+	}
+
+	let currentStatement = $state<Statement | null>(null);
+	let noMoreStatements = $state(false);
 
 	let { data } = $props();
-	console.log("data ", data);
 
 	onMount(() => {
 		if (!data.authenticated) {
@@ -41,7 +44,34 @@
 		// Generate invite link
 		const encodedUri = encodeURIComponent(pollUri);
 		inviteLink = `${window.location.origin}/poll/${encodedUri}/${pollCid}`;
+
+		// Fetch first statement
+		fetchNextStatement();
 	});
+
+	async function fetchNextStatement() {
+		try {
+			const response = await fetch(
+				`/api/polis/${encodeURIComponent(pollUri)}/next_statement`,
+			);
+			if (!response.ok) {
+				throw new Error("Failed to fetch next statement");
+			}
+
+			const statement: Statement | null = await response.json();
+
+			if (statement === null) {
+				noMoreStatements = true;
+				currentStatement = null;
+			} else {
+				noMoreStatements = false;
+				currentStatement = statement;
+			}
+		} catch (e) {
+			console.error("Failed to fetch next statement:", e);
+			error = "Failed to load statement";
+		}
+	}
 
 	async function handleAddStatement() {
 		if (!data.authenticated || !newStatement.trim()) return;
@@ -57,19 +87,9 @@
 			});
 
 			if (response.success && response.uri && response.cid) {
-				// Add the new statement to the local list
-				const cleanCid = response.cid.replace(/^Cid\("(.+)"\)$/, "$1");
-				statements = [
-					...statements,
-					{
-						uri: response.uri,
-						cid: cleanCid,
-						text: newStatement,
-						author: data.did,
-						votes: { agree: 0, disagree: 0, pass: 0 },
-					},
-				];
 				newStatement = "";
+				// Fetch next statement in case the one we just added becomes votable
+				await fetchNextStatement();
 			} else {
 				error = response.message || "Failed to create statement";
 			}
@@ -80,40 +100,34 @@
 		}
 	}
 
-	async function handleVote(
-		statement: (typeof statements)[0],
-		value: "agree" | "disagree" | "pass",
-	) {
-		if (!data.authenticated) return;
+	async function handleVote(value: "agree" | "disagree" | "pass") {
+		console.log("handling vote");
+		if (!data.authenticated || !currentStatement) return;
+		console.log("did not pass");
+
+		votingLoading = true;
+		error = "";
 
 		try {
 			const response = await createVote({
 				value,
-				statement_uri: statement.uri,
-				statement_cid: statement.cid,
+				statement_uri: currentStatement.uri,
+				statement_cid: currentStatement.cid,
 				poll_uri: pollUri,
 				poll_cid: pollCid,
 			});
 
 			if (response.success) {
-				// Update the local vote count and user vote
-				const index = statements.findIndex((s) => s.uri === statement.uri);
-				if (index !== -1) {
-					const updated = [...statements];
-					if (updated[index].votes) {
-						// Remove previous vote if exists
-						if (updated[index].userVote) {
-							updated[index].votes![updated[index].userVote!]--;
-						}
-						// Add new vote
-						updated[index].votes![value]++;
-						updated[index].userVote = value;
-					}
-					statements = updated;
-				}
+				// Fetch the next statement after voting
+				await fetchNextStatement();
+			} else {
+				error = response.message || "Failed to record vote";
 			}
 		} catch (e) {
 			console.error("Vote failed:", e);
+			error = "Failed to submit vote";
+		} finally {
+			votingLoading = false;
 		}
 	}
 
@@ -127,9 +141,9 @@
 <div class="max-w-4xl mx-auto space-y-6">
 	<!-- Poll Header -->
 	<Card class="p-6">
-		<h1 class="text-3xl font-bold mb-2">Poll Details</h1>
+		<h1 class="text-3xl font-bold mb-2">Poll</h1>
 		<p class="text-muted-foreground mb-4">
-			Poll URI: <code class="text-xs">{pollUri}</code>
+			<code class="text-xs">{pollUri}</code>
 		</p>
 
 		<div class="flex gap-2">
@@ -142,6 +156,72 @@
 			Share this link with others to invite them to participate
 		</p>
 	</Card>
+
+	<!-- Voting Section -->
+	{#if currentStatement}
+		<Card class="p-8">
+			<h2 class="text-xl font-semibold mb-4">
+				How do you feel about this statement?
+			</h2>
+
+			<div class="bg-muted p-6 rounded-lg mb-6">
+				<p class="text-lg">{currentStatement.text}</p>
+				<p class="text-sm text-muted-foreground mt-2">
+					by @{currentStatement.did}
+				</p>
+			</div>
+
+			{#if error}
+				<div
+					class="p-3 bg-destructive/10 text-destructive rounded-md text-sm mb-4"
+				>
+					{error}
+				</div>
+			{/if}
+
+			<div class="flex gap-3 justify-center">
+				<Button
+					size="lg"
+					variant="outline"
+					onclick={() => handleVote("disagree")}
+					disabled={votingLoading}
+					class="flex-1"
+				>
+					👎 Disagree
+				</Button>
+				<Button
+					size="lg"
+					variant="outline"
+					onclick={() => handleVote("pass")}
+					disabled={votingLoading}
+					class="flex-1"
+				>
+					🤷 Pass
+				</Button>
+				<Button
+					size="lg"
+					variant="outline"
+					onclick={() => handleVote("agree")}
+					disabled={votingLoading}
+					class="flex-1"
+				>
+					👍 Agree
+				</Button>
+			</div>
+		</Card>
+	{:else if noMoreStatements}
+		<Card class="p-8 text-center">
+			<h2 class="text-2xl font-semibold mb-2">All caught up! 🎉</h2>
+			<p class="text-muted-foreground mb-4">
+				You've voted on all available statements. Add a new statement below to
+				continue the conversation.
+			</p>
+		</Card>
+	{:else}
+		<Card class="p-8 text-center">
+			<p class="text-muted-foreground">Loading statement...</p>
+		</Card>
+	{/if}
 
 	<!-- Add Statement -->
 	<Card class="p-6">
@@ -160,61 +240,9 @@
 				disabled={loading}
 			/>
 
-			{#if error}
-				<div class="p-3 bg-destructive/10 text-destructive rounded-md text-sm">
-					{error}
-				</div>
-			{/if}
-
 			<Button type="submit" disabled={loading || !newStatement.trim()}>
 				{loading ? "Adding..." : "Add Statement"}
 			</Button>
 		</form>
 	</Card>
-
-	<!-- Statements List -->
-	<div class="space-y-4">
-		<h2 class="text-2xl font-semibold">Statements</h2>
-
-		{#if statements.length === 0}
-			<Card class="p-6 text-center text-muted-foreground">
-				No statements yet. Be the first to add one!
-			</Card>
-		{:else}
-			{#each statements as statement (statement.uri)}
-				<Card class="p-6">
-					<p class="text-lg mb-2">{statement.text}</p>
-					<p class="text-sm text-muted-foreground mb-4">
-						by @{statement.author}
-					</p>
-
-					<div class="flex items-center gap-4">
-						<Button
-							size="sm"
-							variant={statement.userVote === "agree" ? "default" : "outline"}
-							onclick={() => handleVote(statement, "agree")}
-						>
-							👍 Agree {statement.votes?.agree || 0}
-						</Button>
-						<Button
-							size="sm"
-							variant={statement.userVote === "disagree"
-								? "default"
-								: "outline"}
-							onclick={() => handleVote(statement, "disagree")}
-						>
-							👎 Disagree {statement.votes?.disagree || 0}
-						</Button>
-						<Button
-							size="sm"
-							variant={statement.userVote === "pass" ? "default" : "outline"}
-							onclick={() => handleVote(statement, "pass")}
-						>
-							🤷 Pass {statement.votes?.pass || 0}
-						</Button>
-					</div>
-				</Card>
-			{/each}
-		{/if}
-	</div>
 </div>

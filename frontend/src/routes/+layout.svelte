@@ -15,7 +15,7 @@
 				{#if authenticated}
 					<span class="text-muted-foreground">@{did}</span>
 					<a href="/polls/create" class="hover:text-primary">Create Poll</a>
-					<a href="/polls" class="hover:text-primary">My Polls</a>
+					<a href="/polls" class="hover:text-primary">Browse Polls</a>
 					<button
 						onclick={() => {
 							window.location.href = "/login";
