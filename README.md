@@ -11,4 +11,27 @@ the user who posted them
 
 Hopefully it will though! 
 
+## Starting development 
+
+Running the api server is as simple as 
+
+```bash
+cargo run
+```
+
+Running the frontend is 
+
+```bash
+cd frontend
+pnpm install
+pnpm dev
+```
+
+
+## TODO 
+
+- Reporing interface 
+- Production OAuth setup
+- Friendlier join urls 
+
 
