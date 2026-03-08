@@ -38,6 +38,7 @@ pub struct CommitData {
     pub collection: String,
     pub rkey: String,
     pub record: Value, // Keep as Value, deserialize based on collection type
+    pub cid: Option<String>, // Content identifier
 }
 
 // Collection identifiers for our custom lexicons

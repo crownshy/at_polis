@@ -19,6 +19,10 @@ pub struct Poll {
     /// Optional timestamp when the poll was closed to new submissions
     #[serde(rename = "closedAt", skip_serializing_if = "Option::is_none")]
     pub closed_at: Option<DateTime<Utc>>,
+
+    pub uri: String,
+    pub did: String,
+    pub cid: String,
 }
 
 /// A statement in the Polis-style deliberation system
@@ -34,6 +38,10 @@ pub struct Statement {
     /// Timestamp when the statement was created
     #[serde(rename = "createdAt")]
     pub created_at: DateTime<Utc>,
+
+    pub uri: String,
+    pub did: String,
+    pub cid: String,
 }
 
 /// A vote on a statement in the Polis-style deliberation system
@@ -52,6 +60,10 @@ pub struct Vote {
     /// Timestamp when the vote was created
     #[serde(rename = "createdAt")]
     pub created_at: DateTime<Utc>,
+
+    pub uri: String,
+    pub did: String,
+    pub cid: String,
 }
 
 /// The possible values for a vote

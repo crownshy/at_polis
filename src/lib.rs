@@ -1,6 +1,6 @@
 use atrium_api::types::string::Did;
 use axum::{
-    extract::{Path, State as AxumState},
+    extract::{Path, State},
     http::StatusCode,
     response::Redirect,
     routing::{delete, get, post},
@@ -14,8 +14,13 @@ use tokio::sync::Mutex;
 use tower_http::cors::{Any, CorsLayer};
 use tower_sessions::{MemoryStore, Session as TowerSession, SessionManagerLayer};
 
-use crate::lexicon::{COLLECTION_POLL, COLLECTION_STATEMENT, COLLECTION_VOTE};
+use crate::{
+    db::{get_polls, get_statements_for_poll},
+    lexicon::{COLLECTION_POLL, COLLECTION_STATEMENT, COLLECTION_VOTE},
+    models::{Poll, Statement},
+};
 
+pub mod db;
 pub mod jetstream;
 pub mod lexicon;
 pub mod models;
@@ -29,7 +34,7 @@ pub struct Mention {
     at: DateTime<Utc>,
 }
 
-pub struct AppState {
+pub struct PolisAppState {
     pub tracked_tags: Arc<Mutex<Vec<String>>>,
     pub tag_mentions: Arc<Mutex<HashMap<String, Vec<Mention>>>>,
     pub oauth_client: Arc<oauth2::ConfiguredOAuthClient>,
@@ -39,9 +44,11 @@ pub struct AppState {
             HashMap<String, Arc<atrium_api::agent::Agent<oauth2::ConfiguredOAuthSession>>>,
         >,
     >,
+    // Database connection
+    pub db: sea_orm::DatabaseConnection,
 }
 
-pub type State = Arc<AppState>;
+pub type AppState = Arc<PolisAppState>;
 
 #[derive(Deserialize)]
 struct AddTagRequest {
@@ -53,15 +60,12 @@ struct TagsResponse {
     tags: Vec<String>,
 }
 
-async fn get_tags(AxumState(state): AxumState<State>) -> Json<TagsResponse> {
+async fn get_tags(State(state): State<AppState>) -> Json<TagsResponse> {
     let tags = state.tracked_tags.lock().await;
     Json(TagsResponse { tags: tags.clone() })
 }
 
-async fn add_tag(
-    AxumState(state): AxumState<State>,
-    Json(payload): Json<AddTagRequest>,
-) -> StatusCode {
+async fn add_tag(State(state): State<AppState>, Json(payload): Json<AddTagRequest>) -> StatusCode {
     let mut tags = state.tracked_tags.lock().await;
     if !tags.contains(&payload.tag) {
         tags.push(payload.tag);
@@ -71,7 +75,7 @@ async fn add_tag(
     }
 }
 
-async fn remove_tag(AxumState(state): AxumState<State>, Path(tag): Path<String>) -> StatusCode {
+async fn remove_tag(State(state): State<AppState>, Path(tag): Path<String>) -> StatusCode {
     let mut tags = state.tracked_tags.lock().await;
     if let Some(pos) = tags.iter().position(|t| t == &tag) {
         tags.remove(pos);
@@ -86,23 +90,9 @@ pub struct TagReport {
     pub mentions: Vec<Mention>,
 }
 
-async fn get_tag_report(
-    AxumState(state): AxumState<State>,
-    Path(tag): Path<String>,
-) -> Result<Json<TagReport>, StatusCode> {
-    let tags = state.tag_mentions.lock().await;
-    if let Some(mentions) = tags.get(&tag) {
-        Ok(Json(TagReport {
-            mentions: (*mentions).clone(),
-        }))
-    } else {
-        Err(StatusCode::NOT_FOUND)
-    }
-}
-
 // Helper function to get OAuth agent from session
 async fn get_oauth_agent(
-    state: &State,
+    state: &AppState,
     session: &TowerSession,
 ) -> Option<Arc<atrium_api::agent::Agent<oauth2::ConfiguredOAuthSession>>> {
     // Get session ID
@@ -132,7 +122,7 @@ struct ErrorResponse {
 }
 
 async fn oauth_init_handler(
-    AxumState(state): AxumState<State>,
+    State(state): State<AppState>,
     Json(payload): Json<OAuthInitRequest>,
 ) -> Result<Json<OAuthInitResponse>, (StatusCode, Json<ErrorResponse>)> {
     use atrium_oauth::{AuthorizeOptions, KnownScope, Scope};
@@ -169,7 +159,7 @@ async fn oauth_init_handler(
 }
 
 async fn oauth_callback_handler(
-    AxumState(state): AxumState<State>,
+    State(state): State<AppState>,
     session: TowerSession,
     axum::extract::RawQuery(query): axum::extract::RawQuery,
 ) -> Result<Redirect, Redirect> {
@@ -248,7 +238,7 @@ struct MeResponse {
     did: Option<Did>,
 }
 
-async fn me_handler(AxumState(state): AxumState<State>, session: TowerSession) -> Json<MeResponse> {
+async fn me_handler(State(state): State<AppState>, session: TowerSession) -> Json<MeResponse> {
     let oauth_agent = get_oauth_agent(&state, &session).await;
     if let Some(agent) = oauth_agent {
         Json(MeResponse {
@@ -264,7 +254,7 @@ async fn me_handler(AxumState(state): AxumState<State>, session: TowerSession) -
 }
 
 async fn logout_handler(
-    AxumState(state): AxumState<State>,
+    State(state): State<AppState>,
     session: TowerSession,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     // Remove agent from storage
@@ -338,8 +328,16 @@ struct CreatePollResponse {
     cid: Option<String>,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CreatePoll {
+    topic: String,
+    description: Option<String>,
+    created_at: DateTime<Utc>,
+    closed_at: Option<DateTime<Utc>>,
+}
+
 async fn create_poll_handler(
-    AxumState(state): AxumState<State>,
+    State(state): State<AppState>,
     session: TowerSession,
     Json(payload): Json<CreatePollRequest>,
 ) -> Result<Json<CreatePollResponse>, StatusCode> {
@@ -352,7 +350,7 @@ async fn create_poll_handler(
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
     // Create the poll record
-    let poll = models::Poll {
+    let poll = CreatePoll {
         topic: payload.topic,
         description: payload.description,
         created_at: Utc::now(),
@@ -407,8 +405,15 @@ async fn create_poll_handler(
     }
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CreateStatement {
+    text: String,
+    poll: models::PollRef,
+    created_at: DateTime<Utc>,
+}
+
 async fn create_statement_handler(
-    AxumState(state): AxumState<State>,
+    State(state): State<AppState>,
     session: TowerSession,
     Json(payload): Json<CreateStatementRequest>,
 ) -> Result<Json<CreateStatementResponse>, StatusCode> {
@@ -421,7 +426,7 @@ async fn create_statement_handler(
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
     // Create the statement record
-    let statement = models::Statement {
+    let statement = CreateStatement {
         text: payload.text,
         poll: models::PollRef {
             uri: payload.poll_uri,
@@ -479,8 +484,16 @@ async fn create_statement_handler(
     }
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CreateVote {
+    pub value: models::VoteValue,
+    pub subject: models::StatementRef,
+    poll: models::PollRef,
+    created_at: DateTime<Utc>,
+}
+
 async fn create_vote_handler(
-    AxumState(state): AxumState<State>,
+    State(state): State<AppState>,
     session: TowerSession,
     Json(payload): Json<CreateVoteRequest>,
 ) -> Result<Json<CreateVoteResponse>, StatusCode> {
@@ -508,7 +521,7 @@ async fn create_vote_handler(
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
     // Create the vote record
-    let vote = models::Vote {
+    let vote = CreateVote {
         value: vote_value,
         subject: models::StatementRef {
             uri: payload.statement_uri,
@@ -569,7 +582,25 @@ async fn create_vote_handler(
     }
 }
 
-pub async fn start_server(state: State) -> Result<(), anyhow::Error> {
+async fn list_statements(
+    State(state): State<AppState>,
+    Path(poll_id): Path<String>,
+) -> Result<Json<Vec<Statement>>, String> {
+    let statements = get_statements_for_poll(&state.db, &poll_id).await.map_err(|e| format!("Failed to get statements {e:#?}"))?;
+    Ok(Json(statements))
+}
+
+async fn list_polls(State(state): State<AppState>) -> Result<Json<Vec<Poll>>, String> {
+    let polls = get_polls(&state.db).await.map_err(|e| format!("Failed to get polls {e:#?}"))?;
+    Ok(Json(polls))
+}
+
+async fn next_statement(State(state):State<AppState)->Result<Json<Option<Statement>>, String>{
+    let statement = next_statements_for_user_on_poll(&state.db, &poll_id, &user_id).await.map_err(|e| format!("Failed to get next statement for user {e:#?}"))?;
+    Ok(statement)
+}
+
+pub async fn start_server(state: AppState) -> Result<(), anyhow::Error> {
     // Set up session store
     let session_store = MemoryStore::default();
     let session_layer = SessionManagerLayer::new(session_store).with_secure(false); // Set to true in production with HTTPS
@@ -583,10 +614,6 @@ pub async fn start_server(state: State) -> Result<(), anyhow::Error> {
     let app = Router::new()
         .route("/", get(|| async { "Hello, World!" }))
         // Tag tracking endpoints
-        .route("/tags", get(get_tags))
-        .route("/tags", post(add_tag))
-        .route("/tags/{tag}", get(get_tag_report))
-        .route("/tags/{tag}", delete(remove_tag))
         // OAuth endpoints
         .route("/oauth/authorize", post(oauth_init_handler))
         .route("/oauth/callback", get(oauth_callback_handler))
@@ -594,7 +621,10 @@ pub async fn start_server(state: State) -> Result<(), anyhow::Error> {
         .route("/me", get(me_handler))
         // Polis endpoints
         .route("/polls", post(create_poll_handler))
+        .route("/polls", get(list_polls))
         .route("/statements", post(create_statement_handler))
+        .route("/polls/:poll_id/statements", get(list_statements))
+        .route("/polis/:poll_id/next_statement", get(next_statement))
         .route("/votes", post(create_vote_handler))
         .layer(cors)
         .layer(session_layer)
