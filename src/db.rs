@@ -277,13 +277,37 @@ pub async fn get_polls(db: &DatabaseConnection) -> Result<Vec<Poll>, sea_orm::Db
 pub async fn next_statements_for_user_on_poll(
     db: &DatabaseConnection,
     poll_uri: &str,
-    user_uri: &str,
+    user_did: &str,
 ) -> Result<Option<Statement>, anyhow::Error> {
-    let models = statement_entity::Entity::find()
-        .filter(statement_entity::Column::PollUri.eq(poll_uri))
-        .order_by_asc(statement_entity::Column::CreatedAt)
-        .all(db)
+    let result = statement_entity::Entity::find()
+        .from_raw_sql(sea_orm::Statement::from_sql_and_values(
+            sea_orm::DbBackend::Sqlite,
+            r#"
+            SELECT * FROM statements
+            WHERE poll_uri = ?
+            AND uri NOT IN (
+                SELECT statement_uri FROM votes
+                WHERE poll_uri = ? AND did = ?
+            )
+            ORDER BY RANDOM()
+            LIMIT 1
+            "#,
+            vec![poll_uri.into(), poll_uri.into(), user_did.into()],
+        ))
+        .one(db)
         .await?;
+
+    Ok(result.map(|model| Statement {
+        text: model.text,
+        poll: PollRef {
+            uri: model.poll_uri,
+            cid: model.poll_cid,
+        },
+        created_at: model.created_at,
+        did: model.did,
+        cid: model.cid,
+        uri: model.uri,
+    }))
 }
 
 /// Get all statements for a poll

@@ -15,7 +15,7 @@ use tower_http::cors::{Any, CorsLayer};
 use tower_sessions::{MemoryStore, Session as TowerSession, SessionManagerLayer};
 
 use crate::{
-    db::{get_polls, get_statements_for_poll},
+    db::{get_polls, get_statements_for_poll, next_statements_for_user_on_poll},
     lexicon::{COLLECTION_POLL, COLLECTION_STATEMENT, COLLECTION_VOTE},
     models::{Poll, Statement},
 };
@@ -586,18 +586,38 @@ async fn list_statements(
     State(state): State<AppState>,
     Path(poll_id): Path<String>,
 ) -> Result<Json<Vec<Statement>>, String> {
-    let statements = get_statements_for_poll(&state.db, &poll_id).await.map_err(|e| format!("Failed to get statements {e:#?}"))?;
+    let statements = get_statements_for_poll(&state.db, &poll_id)
+        .await
+        .map_err(|e| format!("Failed to get statements {e:#?}"))?;
     Ok(Json(statements))
 }
 
 async fn list_polls(State(state): State<AppState>) -> Result<Json<Vec<Poll>>, String> {
-    let polls = get_polls(&state.db).await.map_err(|e| format!("Failed to get polls {e:#?}"))?;
+    let polls = get_polls(&state.db)
+        .await
+        .map_err(|e| format!("Failed to get polls {e:#?}"))?;
     Ok(Json(polls))
 }
 
-async fn next_statement(State(state):State<AppState)->Result<Json<Option<Statement>>, String>{
-    let statement = next_statements_for_user_on_poll(&state.db, &poll_id, &user_id).await.map_err(|e| format!("Failed to get next statement for user {e:#?}"))?;
-    Ok(statement)
+/// Return the next satement for the current user
+async fn next_statement(
+    State(state): State<AppState>,
+    Path(poll_id): Path<String>,
+    session: TowerSession,
+) -> Result<Json<Option<Statement>>, String> {
+    let oauth_agent = get_oauth_agent(&state, &session).await;
+    if let Some(agent) = oauth_agent {
+        if let Some(did) = agent.did().await {
+            let statement = next_statements_for_user_on_poll(&state.db, &poll_id, &did.to_string())
+                .await
+                .map_err(|e| format!("Failed to get next statement for user {e:#?}"))?;
+            Ok(Json(statement))
+        } else {
+            Err("User not found".into())
+        }
+    } else {
+        Err("User not found".into())
+    }
 }
 
 pub async fn start_server(state: AppState) -> Result<(), anyhow::Error> {
@@ -623,8 +643,8 @@ pub async fn start_server(state: AppState) -> Result<(), anyhow::Error> {
         .route("/polls", post(create_poll_handler))
         .route("/polls", get(list_polls))
         .route("/statements", post(create_statement_handler))
-        .route("/polls/:poll_id/statements", get(list_statements))
-        .route("/polis/:poll_id/next_statement", get(next_statement))
+        .route("/polls/{poll_id}/statements", get(list_statements))
+        .route("/polis/{poll_id}/next_statement", get(next_statement))
         .route("/votes", post(create_vote_handler))
         .layer(cors)
         .layer(session_layer)
