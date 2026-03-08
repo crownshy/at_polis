@@ -247,6 +247,26 @@ pub async fn upsert_vote(
     Ok(())
 }
 
+/// Get a specific poll by URI
+pub async fn get_poll(db: &DatabaseConnection, poll_uri: &str) -> Result<Option<Poll>, sea_orm::DbErr> {
+    use sea_orm::{ColumnTrait, QueryFilter};
+
+    let model = poll_entity::Entity::find()
+        .filter(poll_entity::Column::Uri.eq(poll_uri))
+        .one(db)
+        .await?;
+
+    Ok(model.map(|model| Poll {
+        topic: model.topic,
+        description: model.description,
+        created_at: model.created_at,
+        closed_at: model.closed_at,
+        did: model.did,
+        cid: model.cid,
+        uri: model.uri,
+    }))
+}
+
 /// Get all polls
 pub async fn get_polls(db: &DatabaseConnection) -> Result<Vec<Poll>, sea_orm::DbErr> {
     use sea_orm::QueryOrder;

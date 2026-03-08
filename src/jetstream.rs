@@ -65,39 +65,6 @@ async fn handle_text(
             let uri = format!("at://{}/{}/{}", did, commit.collection, commit.rkey);
             let cid = commit.cid.clone().unwrap_or_else(|| "unknown".to_string());
 
-            // if commit.collection == "app.bsky.feed.post" {
-            //     // Deserialize to strongly-typed PostRecord
-            //     match serde_json::from_value::<PostRecord>(commit.record) {
-            //         Ok(post_record) => {
-            //             let tags = extract_hash_tags(&post_record);
-            //             // if !tags.is_empty() {
-            //             //     info!("Tags: {tags:#?}");
-            //             // }
-            //             let selected_tags: Vec<Mention> = tags
-            //                 .iter()
-            //                 .filter(|t| tracked_tags.contains(&t.to_lowercase()))
-            //                 .map(|t| Mention {
-            //                     tag: t.clone().to_lowercase(),
-            //                     text: post_record.text.clone(),
-            //                     by: did.clone(),
-            //                     at: Utc::now(),
-            //                 })
-            //                 .collect();
-            //
-            //             if selected_tags.is_empty() {
-            //                 return None;
-            //             } else {
-            //                 info!("Got mentions {selected_tags:#?}");
-            //                 return Some(selected_tags);
-            //             }
-            //         }
-            //         Err(e) => {
-            //             info!("Failed to deserialize post record: {}", e);
-            //             return None;
-            //         }
-            //     }
-            // }
-            // Handle custom Polis lexicon records
             if commit.collection == COLLECTION_POLL {
                 if let Ok(poll) = serde_json::from_value::<Poll>(commit.record) {
                     info!("New poll created: {} ({})", poll.topic, uri);

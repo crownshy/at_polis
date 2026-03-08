@@ -141,18 +141,25 @@
 <div class="max-w-4xl mx-auto space-y-6">
 	<!-- Poll Header -->
 	<Card class="p-6">
-		<h1 class="text-3xl font-bold mb-2">Poll</h1>
-		<p class="text-muted-foreground mb-4">
-			<code class="text-xs">{pollUri}</code>
-		</p>
+		{#if data.poll}
+			<h1 class="text-3xl font-bold mb-2">{data.poll.topic}</h1>
+			{#if data.poll.description}
+				<p class="text-lg text-muted-foreground mb-4">{data.poll.description}</p>
+			{/if}
+		{:else}
+			<h1 class="text-3xl font-bold mb-2">Poll</h1>
+			<p class="text-muted-foreground mb-4">
+				<code class="text-xs">{pollUri}</code>
+			</p>
+		{/if}
 
-		<div class="flex gap-2">
+		<div class="flex gap-2 mb-2">
 			<Input value={inviteLink} readonly class="flex-1" />
 			<Button onclick={copyInviteLink}>
 				{copied ? "Copied!" : "Copy Link"}
 			</Button>
 		</div>
-		<p class="text-xs text-muted-foreground mt-2">
+		<p class="text-xs text-muted-foreground">
 			Share this link with others to invite them to participate
 		</p>
 	</Card>

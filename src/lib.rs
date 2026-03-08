@@ -3,7 +3,7 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
     response::Redirect,
-    routing::{delete, get, post},
+    routing::{get, post},
     Json, Router,
 };
 use chrono::{DateTime, Utc};
@@ -15,7 +15,7 @@ use tower_http::cors::{Any, CorsLayer};
 use tower_sessions::{MemoryStore, Session as TowerSession, SessionManagerLayer};
 
 use crate::{
-    db::{get_polls, get_statements_for_poll, next_statements_for_user_on_poll},
+    db::{get_poll, get_polls, get_statements_for_poll, next_statements_for_user_on_poll},
     lexicon::{COLLECTION_POLL, COLLECTION_STATEMENT, COLLECTION_VOTE},
     models::{Poll, Statement},
 };
@@ -592,6 +592,16 @@ async fn list_statements(
     Ok(Json(statements))
 }
 
+async fn get_poll_handler(
+    State(state): State<AppState>,
+    Path(poll_uri): Path<String>,
+) -> Result<Json<Option<Poll>>, String> {
+    let poll = get_poll(&state.db, &poll_uri)
+        .await
+        .map_err(|e| format!("Failed to get poll {e:#?}"))?;
+    Ok(Json(poll))
+}
+
 async fn list_polls(State(state): State<AppState>) -> Result<Json<Vec<Poll>>, String> {
     let polls = get_polls(&state.db)
         .await
@@ -642,6 +652,7 @@ pub async fn start_server(state: AppState) -> Result<(), anyhow::Error> {
         // Polis endpoints
         .route("/polls", post(create_poll_handler))
         .route("/polls", get(list_polls))
+        .route("/polls/{poll_uri}", get(get_poll_handler))
         .route("/statements", post(create_statement_handler))
         .route("/polls/{poll_id}/statements", get(list_statements))
         .route("/polis/{poll_id}/next_statement", get(next_statement))
